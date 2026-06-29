@@ -1,0 +1,12 @@
+server:
+  url: "ws://localhost:8080/ws"
+  reconnect_max_retries: 3
+  reconnect_interval: 2  # 秒
+
+tls:
+  insecure_skip_verify: true
+  handshake_timeout: 10  # 秒
+
+logging:
+  prefix: "[ELAC-Board] "
+  level: "info"  # debug, info, warn, error
