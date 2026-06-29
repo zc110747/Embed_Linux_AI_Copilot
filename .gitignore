@@ -3,4 +3,4 @@
 sdk/NXP-IMX6ULL
 sdk/qemu
 
-ws-client/ws-client*
+ws-board-agent/ws-board-agent*

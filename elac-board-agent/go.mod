@@ -1,4 +1,4 @@
-module ws-client
+module ws-board-agent
 
 go 1.18
 

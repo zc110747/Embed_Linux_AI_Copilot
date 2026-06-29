@@ -5,8 +5,8 @@ import (
     "log"
     "time"
     
-    "ws-client/executor"
-    "ws-client/protocol"
+    "ws-board-agent/executor"
+    "ws-board-agent/protocol"
     
     "github.com/gorilla/websocket"
 )

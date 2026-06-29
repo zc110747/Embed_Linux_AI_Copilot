@@ -6,7 +6,7 @@ import (
     "os/signal"
     "syscall"
     
-    "ws-client/client"
+    "ws-board-agent/client"
 )
 
 func main() {
