@@ -1,0 +1,391 @@
+////////////////////////////////////////////////////////////////////////////
+//  (c) copyright 2024-by Persional Inc.
+//  All Rights Reserved
+//
+//  Name:
+//      kernel_regmap_i2c.c
+//
+//  Purpose:
+//      i2c1 ap3216驱动。
+//
+// Author:
+//     @听心跳的声音
+//
+//  Assumptions:
+//
+//  Revision History:
+//      12/19/2022   Create New Version
+/////////////////////////////////////////////////////////////////////////////
+/*
+设备树说明
+&i2c1 {
+    clock-frequency = <100000>;
+    pinctrl-names = "default";
+    pinctrl-0 = <&pinctrl_i2c1>;
+    status = "okay";
+
+    ap3216@1e {
+		compatible = "rmk,ap3216";
+		reg = <0x1e>;
+		rmk,sysconf = <0x03>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_ap3216_tsc>;
+		interrupt-parent = <&gpio1>;
+		interrupts = <1 IRQ_TYPE_EDGE_FALLING>;
+		int-gpios = <&gpio1 1 GPIO_ACTIVE_LOW>;
+    };
+};
+
+&iomuxc {
+    pinctrl_i2c1: i2c1grp {
+        fsl,pins = <
+            MX6UL_PAD_UART4_TX_DATA__I2C1_SCL 0x4001b8b0
+            MX6UL_PAD_UART4_RX_DATA__I2C1_SDA 0x4001b8b0
+        >;
+    };
+
+    pinctrl_ap3216_tsc: gpio-ap3216 {
+        fsl,pins = <
+            MX6UL_PAD_GPIO1_IO01__GPIO1_IO01		0x40017059
+        >;
+    };
+};
+*/
+
+#include <linux/types.h>
+#include <linux/kernel.h>
+#include <linux/delay.h>
+#include <linux/init.h>
+#include <linux/module.h>
+#include <linux/errno.h>
+#include <linux/gpio.h>
+#include <linux/cdev.h>
+#include <linux/device.h>
+#include <linux/of_gpio.h>
+#include <linux/semaphore.h>
+#include <linux/platform_device.h>
+#include <linux/i2c.h>
+#include <linux/regmap.h>
+#include <linux/of_irq.h>
+#include <linux/interrupt.h>
+#include <linux/timer.h>
+
+#define AP3216C_SYSTEMCONG          0x00    /* 配置寄存器       */
+#define AP3216C_INTSTATUS           0X01    /* 中断状态寄存器   */
+#define AP3216C_INTCLEAR            0X02    /* 中断清除寄存器   */
+#define AP3216C_IRDATALOW           0x0A    /* IR数据低字节     */
+#define AP3216C_IRDATAHIGH          0x0B    /* IR数据高字节     */
+#define AP3216C_ALSDATALOW          0x0C    /* ALS数据低字节    */
+#define AP3216C_ALSDATAHIGH         0X0D    /* ALS数据高字节    */
+#define AP3216C_PSDATALOW           0X0E    /* PS数据低字节     */
+#define AP3216C_PSDATAHIGH          0X0F    /* PS数据高字节     */
+
+#define DEVICE_NAME                 "ap3216"
+#define DEVICE_CNT                  1
+
+#define DEFAULT_MAJOR               0         
+#define DEFAULT_MINOR               0  
+
+struct read_data
+{
+    unsigned short ir;
+    unsigned short als;
+    unsigned short ps;
+};
+
+struct ap3216_data
+{
+    // 设备信息
+    dev_t dev_id;            
+    struct cdev cdev;      
+    struct class *class;   
+    struct device *device;
+
+    // 硬件信息
+    int irq;
+    struct i2c_client *client;
+    struct regmap *map;
+    struct gpio_desc *int_desc;
+
+    // sys配置
+    u8 sysconf;
+
+    struct mutex lock;
+};
+
+static int ap3216_open(struct inode *inode, struct file *filp)
+{
+    struct ap3216_data *chip;
+
+    chip = container_of(inode->i_cdev, struct ap3216_data, cdev);
+    filp->private_data = chip;
+    return 0;
+}
+
+static ssize_t ap3216_read(struct file *filp, char __user *buf, size_t cnt, loff_t *off)
+{
+    u8 i;
+    int ret;
+    int readbuf[6];
+    struct read_data i2c_data = {0};
+    struct ap3216_data *chip = filp->private_data;
+    struct i2c_client *client = chip->client;
+
+    cnt = min_t(size_t, cnt, sizeof(i2c_data));
+    mutex_lock(&chip->lock);
+    for (i = 0; i < 6; i++) {
+        ret = regmap_read(chip->map, AP3216C_IRDATALOW + i, &readbuf[i]);
+        if (ret) {
+            mutex_unlock(&chip->lock);
+            dev_err(&client->dev, "ap3216_read failed: %d\n", ret);
+            return ret;
+        }
+    }
+    mutex_unlock(&chip->lock);
+
+    // 0: 有效 1: 无效
+    if ((readbuf[0]&(1<<7)) || (readbuf[4]&(1<<6))) {
+        i2c_data.ir = 0;
+        i2c_data.ps = 0;
+    } else{
+        i2c_data.ir = ((unsigned short)readbuf[1] << 2) | (readbuf[0] & 0X03);
+        i2c_data.ps = ((unsigned short)(readbuf[5] & 0X3F) << 4) | (readbuf[4] & 0X0F); 
+    }
+    i2c_data.als = ((unsigned short)readbuf[3] << 8) | readbuf[2];
+
+    if (copy_to_user(buf, &i2c_data, cnt)) {
+        dev_err(&client->dev, "copy_to_user failed!\n");
+        return -EFAULT;
+    }
+    return cnt;
+}
+
+static int ap3216_release(struct inode *inode, struct file *filp)
+{
+    return 0;
+}
+
+static irqreturn_t irq_handler(int irq, void *data)
+{
+    int ret;
+    struct ap3216_data* chip;
+    struct i2c_client *client;
+
+    chip = (struct ap3216_data*)data;
+    client = chip->client;
+
+    dev_info(&client->dev, "ap3216 irq_handler!\n");
+
+    mutex_lock(&chip->lock);
+    ret = regmap_write(chip->map, AP3216C_INTCLEAR, 0x01);
+    if (ret) 
+        dev_err(&client->dev, "regmap_write failed: %d", ret);
+    mutex_unlock(&chip->lock);
+
+    return IRQ_HANDLED;
+}
+
+static const struct file_operations ap3216_ops = {
+    .owner = THIS_MODULE,
+    .open = ap3216_open,
+    .read = ap3216_read,
+    .release = ap3216_release,
+};
+
+static int i2c_device_create(struct ap3216_data *chip)
+{
+    int ret;
+    int major = DEFAULT_MAJOR;
+    int minor = DEFAULT_MINOR;
+    struct i2c_client *client = chip->client;
+
+    // 1.申请设备号
+    if (major) {
+        chip->dev_id= MKDEV(major, minor);
+        ret = register_chrdev_region(chip->dev_id, 1, DEVICE_NAME);
+    } else {
+        ret = alloc_chrdev_region(&chip->dev_id, 0, 1, DEVICE_NAME);
+        major = MAJOR(chip->dev_id);
+        minor = MINOR(chip->dev_id);
+    }
+    if (ret < 0) {
+        dev_err(&client->dev, "dev alloc id failed\n");
+        goto exit;
+    }
+
+    // 2.创建字符设备，关联设备号，添加到内核
+    cdev_init(&chip->cdev, &ap3216_ops);
+    chip->cdev.owner = THIS_MODULE;
+    ret = cdev_add(&chip->cdev, chip->dev_id, 1);
+    if (ret != 0){
+        dev_err(&client->dev, "cdev add failed\n");
+        goto exit_cdev_add;
+    }
+
+    // 3.创建设备类和设备文件，关联设备号添加到系统目录中
+    chip->class = class_create(THIS_MODULE, DEVICE_NAME);
+    if (IS_ERR(chip->class)){
+        dev_err(&client->dev, "class create failed!\n");
+        ret = PTR_ERR(chip->class);
+        goto exit_class_create;
+    }
+    chip->device = device_create(chip->class, NULL, chip->dev_id, NULL, DEVICE_NAME);
+    if (IS_ERR(chip->device)){
+        dev_err(&client->dev, "device create failed!\n");
+        ret = PTR_ERR(chip->device);
+        goto exit_device_create;
+    }
+
+    dev_info(&client->dev, "dev create ok, major:%d, minor:%d\n", major, minor);
+    return 0;
+
+exit_device_create:
+    class_destroy(chip->class);
+exit_class_create:
+    cdev_del(&chip->cdev);
+exit_cdev_add:
+    unregister_chrdev_region(chip->dev_id, 1);
+exit:
+    return ret;
+}
+
+static void i2c_device_release(struct ap3216_data *chip)
+{
+    if (chip->device)
+        device_destroy(chip->class, chip->dev_id);
+    
+    if (chip->class)
+        class_destroy(chip->class);
+
+    cdev_del(&chip->cdev);
+    unregister_chrdev_region(chip->dev_id, DEVICE_CNT);   
+}
+
+const struct regmap_config ap3216_regmap_config = {
+    .reg_bits = 8,
+    .val_bits = 8,
+    .reg_stride = 1,
+    .max_register = 255,
+};
+
+static int i2c_probe(struct i2c_client *client, const struct i2c_device_id *id)
+{
+    int ret;
+    struct ap3216_data *chip = NULL;
+    struct device_node *np = client->dev.of_node;
+
+    // 1.申请ap3216控制块
+    chip = devm_kzalloc(&client->dev, sizeof(struct ap3216_data), GFP_KERNEL);
+    if (!chip) {
+        dev_err(&client->dev, "malloc error\n");
+        return -ENOMEM;
+    }
+    chip->client = client;
+    i2c_set_clientdata(client, chip);
+    mutex_init(&chip->lock);
+
+    // 2.初始化regmap i2c控制结构
+    chip->map = devm_regmap_init_i2c(client, &ap3216_regmap_config);
+    if (IS_ERR(chip->map))
+    {
+        dev_err(&client->dev, "chip map init failed\n");
+        return -ENXIO;
+    }
+
+    // 3.配置i2c设备
+    ret = of_property_read_u8(np, "rmk,sysconf", &chip->sysconf);
+    if (ret) {
+        dev_warn(&client->dev, "read failed, error:%d", ret);
+        chip->sysconf = 0x03;
+    }
+
+    ret = regmap_write(chip->map, AP3216C_SYSTEMCONG, 0x04);
+    if (ret) {
+        return ret;
+    }
+    msleep(50);
+    ret = regmap_write(chip->map, AP3216C_SYSTEMCONG, chip->sysconf);
+    if (ret) {
+        return ret;
+    }
+    msleep(50);
+
+    // 4.创建i2c设备到内核和系统中
+    ret = i2c_device_create(chip);
+    if (ret){
+        dev_err(&client->dev, "device create failed!\n");
+        return ret;   
+    }
+
+    // 5. 获取ap3216c的interrupt引脚，设置为输入，并申请相应中断
+    chip->int_desc = devm_gpiod_get(&client->dev, "int", GPIOD_IN);
+    if (IS_ERR(chip->int_desc)) {
+        dev_err(&client->dev, "gpio get failed!\n");
+        ret = PTR_ERR(chip->int_desc);
+        goto err_flag;
+    }
+    chip->irq = gpiod_to_irq(chip->int_desc);
+    if (chip->irq < 0) {
+        dev_err(&client->dev, "gpiod_to_irq failed:%d!\n", chip->irq);
+        ret = chip->irq;
+        goto err_flag;  
+    }
+    ret = devm_request_threaded_irq(&client->dev, 
+                            chip->irq, 
+                            NULL, 
+                            irq_handler, 
+                            IRQF_ONESHOT | IRQF_TRIGGER_FALLING, 
+                            "ap3216_int", 
+                            (void *)chip);
+    if (ret < 0) {
+        dev_err(&client->dev, "ap3216 i2c int error:%d\n", ret);
+        goto err_flag;
+    }
+
+    dev_info(&client->dev, "i2c driver init ok, sysconf:%d!\n", chip->sysconf);
+    return 0;
+
+err_flag:
+    i2c_device_release(chip);
+    return ret;
+}
+
+static void i2c_remove(struct i2c_client *client)
+{
+    struct ap3216_data *chip = i2c_get_clientdata(client);
+
+    i2c_device_release(chip);
+
+    dev_info(&client->dev, "i2c driver release ok!\n");
+}
+
+static const struct of_device_id ap3216_of_match[] = {
+    { .compatible = "rmk,ap3216" },
+    { /* Sentinel */ }
+};
+
+static struct i2c_driver ap3216_driver = {
+    .probe = i2c_probe,
+    .remove = i2c_remove,
+    .driver = {
+        .name = "ap3216",
+        .of_match_table = ap3216_of_match, 
+    },
+};
+
+static int __init ap3216_module_init(void)
+{
+    return i2c_add_driver(&ap3216_driver);
+}
+
+static void __exit ap3216_module_exit(void)
+{
+    i2c_del_driver(&ap3216_driver);
+}
+
+module_init(ap3216_module_init);
+module_exit(ap3216_module_exit);
+MODULE_AUTHOR("zc");                      
+MODULE_LICENSE("GPL v2");                  
+MODULE_DESCRIPTION("ap3216 remap driver");      
+MODULE_ALIAS("i2c_ap3216_driver");

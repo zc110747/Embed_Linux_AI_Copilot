@@ -1,0 +1,122 @@
+################################################################################
+# This file is used to define global alias, if want to create the build system, 
+# also need update the file.
+#
+################################################################################
+# build qemu support kernel
+function build_kernel()
+{
+    cd ${AI_PLATFORM_SOC_PATH}/linux-imx-lf-6.1.y-patch || return
+
+    ./kernel_upgrade.sh
+
+    cd ${AI_PLATFORM_SOC_PATH}/platform-shell || return
+
+    ./make.sh kernel $1
+}
+alias AiKernel="build_kernel"
+
+# build qemu and run
+function build_qemu()
+{
+    cd ${AI_PLATFORM_SOC_PATH}/platform-shell || return
+
+    ./build-qemu.sh $1
+}
+alias AiQemu="build_qemu"
+
+# build qemu and run
+function build_rootfs()
+{
+    cd "${AI_PLATFORM_SOC_PATH}"/platform-shell || return
+
+    cp -rv ${AI_PLATFORM_SOC_PATH}/buildroot-patch/imx6ullrmk_defconfig ${AI_SDK_SOC_PATH}/rootfs/buildroot/configs/
+
+    ./make.sh rootfs $1
+}
+alias AiRootfs="build_rootfs"
+
+function mount_rootfs()
+{
+    sdk_img="${AI_SDK_SOC_PATH}"/package/debian.img
+
+    if [ ! -f "$sdk_img" ]; then
+        echo "no exist:${sdk_img}" 
+        return
+    fi
+
+    sudo mount -o loop ${sdk_img} ${AI_SDK_NFS_PATH}
+}
+alias AiMountRootfs="mount_rootfs"
+
+function umount_rootfs()
+{
+    sudo umount -l ${AI_SDK_NFS_PATH}
+}
+alias AiUMountRootfs="umount_rootfs"
+
+# Function:
+# umount_chroot
+#
+# Description:
+# umount kernel process in the chroot directory for exit
+#
+# Parameters:
+# none
+umount_chroot()
+{
+    while grep -Eq "${AI_SDK_NFS_PATH}.*(dev|proc|sys)" /proc/mounts
+    do
+        sudo umount -l --recursive "${AI_SDK_NFS_PATH}"/dev >/dev/null 2>&1
+        sudo umount -l "${AI_SDK_NFS_PATH}"/proc >/dev/null 2>&1
+        sudo umount -l "${AI_SDK_NFS_PATH}"/sys >/dev/null 2>&1
+        sleep 5
+    done
+}
+
+# Function:
+# mount_chroot
+#
+# Description:
+# mount kernel process in the chroot directory then can run
+#
+# Parameters:
+# none
+mount_chroot()
+{
+    sudo mount -t proc chproc "${AI_SDK_NFS_PATH}"/proc
+    sudo mount -t sysfs chsys "${AI_SDK_NFS_PATH}"/sys
+    sudo mount -t devtmpfs chdev "${AI_SDK_NFS_PATH}"/dev || sudo mount --bind /dev "${AI_SDK_NFS_PATH}"/dev
+    sudo mount -t devpts chpts "${AI_SDK_NFS_PATH}"/dev/pts
+}
+
+function enter_chroot()
+{
+    cd "${AI_SDK_NFS_PATH}"/ || return
+
+    mount_rootfs
+    
+    # exit the chroot
+    umount_chroot
+
+    #enter chroot
+    mount_chroot
+
+    if [ -f "${AI_SDK_NFS_PATH}"/bin/bash ]; then
+        LC_ALL=C LANGUAGE=C LANG=C sudo chroot "${AI_SDK_NFS_PATH}" chown root:root /usr/bin/sudo
+        LC_ALL=C LANGUAGE=C LANG=C sudo chroot "${AI_SDK_NFS_PATH}" chmod u+s /usr/bin/sudo
+        LC_ALL=C LANGUAGE=C LANG=C sudo chroot "${AI_SDK_NFS_PATH}"
+    else
+        LC_ALL=C LANGUAGE=C LANG=C sudo chroot "${AI_SDK_NFS_PATH}" /bin/sh
+    fi    
+}
+alias AiEnterChroot="enter_chroot"
+
+function exit_chroot()
+{
+    # exit the chroot
+    umount_chroot
+
+    umount_rootfs
+}
+alias AiExitChroot="exit_chroot"

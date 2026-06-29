@@ -1,0 +1,36 @@
+################################################################################
+# This file is used to define global vars, if want to create the build system, 
+# also need update the file.
+#
+################################################################################
+
+echo "Load the AI Copilot Env Data..."
+
+export CPU_PROGRAM=NXP-IMX6ULL
+export COMPILE_CPU_CORE=6
+export AI_PROGRAM_PATH=/home/freedom/coding_git/Embed_LINUX_AI_Copilot
+
+#-------------------------------------------------------------------------------
+# This section defines the internal 
+# Not need Change unless program change.
+#-------------------------------------------------------------------------------
+export AI_PLATFORM_PATH=${AI_PROGRAM_PATH}/platform
+export AI_PLATFORM_SOC_PATH=${AI_PLATFORM_PATH}/${CPU_PROGRAM}
+
+export AI_SDK_PATH=${AI_PROGRAM_PATH}/sdk
+export AI_SDK_QEMU_PATH=${AI_SDK_PATH}/qemu
+export AI_SDK_SOC_PATH=${AI_SDK_PATH}/${CPU_PROGRAM}
+export AI_SDK_NFS_PATH=${AI_SDK_SOC_PATH}/nfs
+
+source ${AI_PROGRAM_PATH}/env/defineAlias
+
+export AI_IMG=buildroot.img
+
+#-------------------------------------------------------------------------------
+# This section defines global alias
+#-------------------------------------------------------------------------------
+alias aip="cd ${AI_PROGRAM_PATH}"
+alias aipp="cd ${AI_PLATFORM_SOC_PATH}"
+alias aips="cd ${AI_SDK_SOC_PATH}"
+alias aipq="cd ${AI_SDK_QEMU_PATH}"
+alias aipn="cd ${AI_SDK_NFS_PATH}"
