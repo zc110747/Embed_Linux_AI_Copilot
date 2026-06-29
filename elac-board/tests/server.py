@@ -95,7 +95,9 @@ class WebSocketTestServer:
         logger.info("测试 1: 发送 collect 请求")
         
         pyload={
-            "collector": "dmesg",
+            "collector": "i2c-diagnose",
+            "bus": 1,
+            "address": "0x50",
         }
 
         request = self.generate_request("collect", self.session_id, pyload)

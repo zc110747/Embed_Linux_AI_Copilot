@@ -1,0 +1,29 @@
+{
+  "name": "i2c-diagnose",
+  "version": "1.0",
+  "params": {
+    "bus": 0
+  },
+  "steps": [
+    {
+      "name": "bus_list",
+      "type": "exec",
+      "input": "i2cdetect -l"
+    },
+    {
+      "name": "device_scan",
+      "type": "exec",
+      "input": "i2cdetect -y {{bus}}"
+    },
+    {
+      "name": "sysfs_binding",
+      "type": "exec",
+      "input": "ls /sys/bus/i2c/devices/"
+    },
+    {
+      "name": "driver_log",
+      "type": "exec",
+      "input": "dmesg | grep -i i2c"
+    }
+  ]
+}

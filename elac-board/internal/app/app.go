@@ -114,7 +114,7 @@ func handleMessage(raw []byte, logger *utils.Logger) (interface{}, error) {
 		return protocol.NewErrorResponse("", "parse_error", err.Error()), nil
 	}
 
-	logger.Debug("请求类型: %s, 动作: %s, ID: %s", req.Type, req.Action, req.ID)
+	logger.Info("请求类型: %s, 动作: %s, ID: %s, Pyload:%s", req.Type, req.Action, req.ID, utils.PrettyJSON(req.Payload))
 
 	switch req.Action {
 	case "ping":
@@ -126,7 +126,7 @@ func handleMessage(raw []byte, logger *utils.Logger) (interface{}, error) {
 
 	case "collect":
 		logger.Debug("处理 collect 请求")
-		data, err := collector.CollectSystemInfo()
+		data, err := collector.CollectHandler(req)
 		if err != nil {
 			logger.Error("采集失败: %v", err)
 			return protocol.NewErrorResponse(req.SessionID, "collect_error", err.Error()), nil
