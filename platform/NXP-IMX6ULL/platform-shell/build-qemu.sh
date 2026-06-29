@@ -2,30 +2,30 @@ function help()
 {
     echo
     echo "Usage:"
-    echo "  AiQemu [sub-command]"
+    echo "  AgentQemu [sub-command]"
     echo "  ./build-qemu.sh [sub-command]"
     echo 
     echo "sub-command:  -h | -s | -u | -a | -r"
     echo
     echo "Example:"
     echo
-    echo "AiQemu -h             --- help, show command help"
-    echo "AiQemu -s             --- sample, only build qemu"
-    echo "AiQemu -u             --- update, update and build qemu"
-    echo "AiQemu -a             --- all, configuration、update、build qemu"
-    echo "AiQemu -r             --- run, start run qemu"
+    echo "AgentQemu -h             --- help, show command help"
+    echo "AgentQemu -s             --- sample, only build qemu"
+    echo "AgentQemu -u             --- update, update and build qemu"
+    echo "AgentQemu -a             --- all, configuration、update、build qemu"
+    echo "AgentQemu -r             --- run, start run qemu"
 }
 
 function compile_sample()
 {
-    cd ${AI_SDK_QEMU_PATH}/
+    cd ${AGENT_SDK_QEMU_PATH}/
 
     make -j${COMPILE_CPU_CORE}
 }
 
 function compile_update()
 {
-    cd ${AI_PLATFORM_SOC_PATH}/qemu-11.0.0-patch
+    cd ${AGENT_PLATFORM_SOC_PATH}/qemu-11.0.0-patch
 
     # 更新qemu代码
     ./qemu_upgrade.sh
@@ -36,7 +36,7 @@ function compile_update()
 
 function compile_all()
 {
-    cd ${AI_SDK_QEMU_PATH}/
+    cd ${AGENT_SDK_QEMU_PATH}/
 
     ./configure --prefix=$PWD/ --target-list="arm-softmmu arm-linux-user" --enable-debug --enable-sdl \
         --enable-slirp --enable-kvm --enable-tools --disable-curl --disable-coreaudio \
@@ -47,13 +47,13 @@ function compile_all()
 
 function qemu_run()
 {
-    kernel_file="${AI_SDK_SOC_PATH}/package/zImage"
-    dtb_file="${AI_SDK_SOC_PATH}/package/imx6ull-qemu.dtb"
-    rootfs_file="${AI_SDK_SOC_PATH}/package/${AI_IMG}"
+    kernel_file="${AGENT_SDK_SOC_PATH}/package/zImage"
+    dtb_file="${AGENT_SDK_SOC_PATH}/package/imx6ull-qemu.dtb"
+    rootfs_file="${AGENT_SDK_SOC_PATH}/package/${AGENT_IMG}"
 
     # nogui
     # qemu_tools=qemu-system-arm
-    qemu_tools=${AI_SDK_QEMU_PATH}/build/qemu-system-arm
+    qemu_tools=${AGENT_SDK_QEMU_PATH}/build/qemu-system-arm
     sudo ${qemu_tools} -M mcimx6ul-evk -m 512M -kernel "${kernel_file}" \
         -dtb "${dtb_file}"  \
         -nographic \

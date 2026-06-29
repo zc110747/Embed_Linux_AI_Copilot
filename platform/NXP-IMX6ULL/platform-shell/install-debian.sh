@@ -8,7 +8,7 @@
 chip_arch=armhf
 qemu_arch=arm
 opt_debian_ver=bookworm
-debian_dir=${AI_SDK_SOC_PATH}/rootfs/debian
+debian_dir=${AGENT_SDK_SOC_PATH}/rootfs/debian
 
 # install support
 sudo apt-get install debootstrap debian-archive-keyring qemu-user-static -y

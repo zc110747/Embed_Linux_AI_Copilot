@@ -6,54 +6,54 @@
 # build qemu support kernel
 function build_kernel()
 {
-    cd ${AI_PLATFORM_SOC_PATH}/linux-imx-lf-6.1.y-patch || return
+    cd ${AGENT_PLATFORM_SOC_PATH}/linux-imx-lf-6.1.y-patch || return
 
     ./kernel_upgrade.sh
 
-    cd ${AI_PLATFORM_SOC_PATH}/platform-shell || return
+    cd ${AGENT_PLATFORM_SOC_PATH}/platform-shell || return
 
     ./make.sh kernel $1
 }
-alias AiKernel="build_kernel"
+alias AgentKernel="build_kernel"
 
 # build qemu and run
 function build_qemu()
 {
-    cd ${AI_PLATFORM_SOC_PATH}/platform-shell || return
+    cd ${AGENT_PLATFORM_SOC_PATH}/platform-shell || return
 
     ./build-qemu.sh $1
 }
-alias AiQemu="build_qemu"
+alias AgentQemu="build_qemu"
 
 # build qemu and run
 function build_rootfs()
 {
-    cd "${AI_PLATFORM_SOC_PATH}"/platform-shell || return
+    cd "${AGENT_PLATFORM_SOC_PATH}"/platform-shell || return
 
-    cp -rv ${AI_PLATFORM_SOC_PATH}/buildroot-patch/imx6ullrmk_defconfig ${AI_SDK_SOC_PATH}/rootfs/buildroot/configs/
+    cp -rv ${AGENT_PLATFORM_SOC_PATH}/buildroot-patch/imx6ullrmk_defconfig ${AGENT_SDK_SOC_PATH}/rootfs/buildroot/configs/
 
     ./make.sh rootfs $1
 }
-alias AiRootfs="build_rootfs"
+alias AgentRootfs="build_rootfs"
 
 function mount_rootfs()
 {
-    sdk_img="${AI_SDK_SOC_PATH}"/package/debian.img
+    sdk_img="${AGENT_SDK_SOC_PATH}"/package/debian.img
 
     if [ ! -f "$sdk_img" ]; then
         echo "no exist:${sdk_img}" 
         return
     fi
 
-    sudo mount -o loop ${sdk_img} ${AI_SDK_NFS_PATH}
+    sudo mount -o loop ${sdk_img} ${AGENT_SDK_NFS_PATH}
 }
-alias AiMountRootfs="mount_rootfs"
+alias AgentMountRootfs="mount_rootfs"
 
 function umount_rootfs()
 {
-    sudo umount -l ${AI_SDK_NFS_PATH}
+    sudo umount -l ${AGENT_SDK_NFS_PATH}
 }
-alias AiUMountRootfs="umount_rootfs"
+alias AgentUMountRootfs="umount_rootfs"
 
 # Function:
 # umount_chroot
@@ -65,11 +65,11 @@ alias AiUMountRootfs="umount_rootfs"
 # none
 umount_chroot()
 {
-    while grep -Eq "${AI_SDK_NFS_PATH}.*(dev|proc|sys)" /proc/mounts
+    while grep -Eq "${AGENT_SDK_NFS_PATH}.*(dev|proc|sys)" /proc/mounts
     do
-        sudo umount -l --recursive "${AI_SDK_NFS_PATH}"/dev >/dev/null 2>&1
-        sudo umount -l "${AI_SDK_NFS_PATH}"/proc >/dev/null 2>&1
-        sudo umount -l "${AI_SDK_NFS_PATH}"/sys >/dev/null 2>&1
+        sudo umount -l --recursive "${AGENT_SDK_NFS_PATH}"/dev >/dev/null 2>&1
+        sudo umount -l "${AGENT_SDK_NFS_PATH}"/proc >/dev/null 2>&1
+        sudo umount -l "${AGENT_SDK_NFS_PATH}"/sys >/dev/null 2>&1
         sleep 5
     done
 }
@@ -84,15 +84,15 @@ umount_chroot()
 # none
 mount_chroot()
 {
-    sudo mount -t proc chproc "${AI_SDK_NFS_PATH}"/proc
-    sudo mount -t sysfs chsys "${AI_SDK_NFS_PATH}"/sys
-    sudo mount -t devtmpfs chdev "${AI_SDK_NFS_PATH}"/dev || sudo mount --bind /dev "${AI_SDK_NFS_PATH}"/dev
-    sudo mount -t devpts chpts "${AI_SDK_NFS_PATH}"/dev/pts
+    sudo mount -t proc chproc "${AGENT_SDK_NFS_PATH}"/proc
+    sudo mount -t sysfs chsys "${AGENT_SDK_NFS_PATH}"/sys
+    sudo mount -t devtmpfs chdev "${AGENT_SDK_NFS_PATH}"/dev || sudo mount --bind /dev "${AGENT_SDK_NFS_PATH}"/dev
+    sudo mount -t devpts chpts "${AGENT_SDK_NFS_PATH}"/dev/pts
 }
 
 function enter_chroot()
 {
-    cd "${AI_SDK_NFS_PATH}"/ || return
+    cd "${AGENT_SDK_NFS_PATH}"/ || return
 
     mount_rootfs
     
@@ -102,15 +102,15 @@ function enter_chroot()
     #enter chroot
     mount_chroot
 
-    if [ -f "${AI_SDK_NFS_PATH}"/bin/bash ]; then
-        LC_ALL=C LANGUAGE=C LANG=C sudo chroot "${AI_SDK_NFS_PATH}" chown root:root /usr/bin/sudo
-        LC_ALL=C LANGUAGE=C LANG=C sudo chroot "${AI_SDK_NFS_PATH}" chmod u+s /usr/bin/sudo
-        LC_ALL=C LANGUAGE=C LANG=C sudo chroot "${AI_SDK_NFS_PATH}"
+    if [ -f "${AGENT_SDK_NFS_PATH}"/bin/bash ]; then
+        LC_ALL=C LANGUAGE=C LANG=C sudo chroot "${AGENT_SDK_NFS_PATH}" chown root:root /usr/bin/sudo
+        LC_ALL=C LANGUAGE=C LANG=C sudo chroot "${AGENT_SDK_NFS_PATH}" chmod u+s /usr/bin/sudo
+        LC_ALL=C LANGUAGE=C LANG=C sudo chroot "${AGENT_SDK_NFS_PATH}"
     else
-        LC_ALL=C LANGUAGE=C LANG=C sudo chroot "${AI_SDK_NFS_PATH}" /bin/sh
+        LC_ALL=C LANGUAGE=C LANG=C sudo chroot "${AGENT_SDK_NFS_PATH}" /bin/sh
     fi    
 }
-alias AiEnterChroot="enter_chroot"
+alias AgentEnterChroot="enter_chroot"
 
 function exit_chroot()
 {
@@ -119,4 +119,4 @@ function exit_chroot()
 
     umount_rootfs
 }
-alias AiExitChroot="exit_chroot"
+alias AgentExitChroot="exit_chroot"

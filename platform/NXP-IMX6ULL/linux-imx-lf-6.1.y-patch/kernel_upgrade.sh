@@ -1,7 +1,7 @@
 
 # path
 SRC_DIR=$(pwd)
-DST_DIR=${AI_SDK_SOC_PATH}/kernel
+DST_DIR=${AGENT_SDK_SOC_PATH}/kernel
 
 #dts
 cp -rv ${SRC_DIR}/arch/arm/boot/dts/* ${DST_DIR}/arch/arm/boot/dts/
