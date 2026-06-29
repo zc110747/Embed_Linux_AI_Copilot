@@ -126,6 +126,7 @@ func (c *WebSocketClient) handleRequest(message []byte) (*Response, error) {
 
 	c.logger.Printf("请求类型: %s", req.Type)
 	c.logger.Printf("请求动作: %s", req.Action)
+	c.logger.Printf("额外信息: %s", req.Payload)
 	c.logger.Printf("请求 ID: %s", req.ID)
 	c.logger.Printf("Session ID: %s", req.SessionID)
 

@@ -67,13 +67,13 @@ class WebSocketTestServer:
             await self.send_collect_request(websocket)
             
             # 测试 2: 发送 ping 请求
-            await self.send_ping_request(websocket)
+            # await self.send_ping_request(websocket)
             
             # 测试 3: 发送带自定义 payload 的请求
-            await self.send_custom_request(websocket)
+            # await self.send_custom_request(websocket)
             
             # 测试 4: 发送 get_status 请求
-            await self.send_get_status_request(websocket)
+            # await self.send_get_status_request(websocket)
             
             logger.info(f"========================================")
             logger.info("所有测试请求已完成")
@@ -94,7 +94,11 @@ class WebSocketTestServer:
         logger.info("----------------------------------------")
         logger.info("测试 1: 发送 collect 请求")
         
-        request = self.generate_request("collect", self.session_id)
+        pyload={
+            "collector": "dmesg",
+        }
+
+        request = self.generate_request("collect", self.session_id, pyload)
         
         # 发送请求
         logger.info("发送请求:")
