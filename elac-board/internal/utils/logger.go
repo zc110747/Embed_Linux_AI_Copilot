@@ -104,5 +104,7 @@ func (l *Logger) Println(v ...interface{}) {
 	l.logger.Println(v...)
 }
 
-// 确保 Logger 实现 io.Writer 接口的某些方法
-var _ = fmt.Stringer(&Logger{})
+// String 实现 fmt.Stringer 接口
+func (l *Logger) String() string {
+	return fmt.Sprintf("Logger{level=%s}", l.LevelString())
+}
