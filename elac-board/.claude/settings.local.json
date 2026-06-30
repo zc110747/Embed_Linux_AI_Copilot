@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go build *)",
+      "Bash(python3 -m json.tool /home/freedom/git/Embed_Linux_AI_Copilot/elac-board/configs/features/spi-diagnose.json)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(GOPROXY=https://goproxy.cn,direct go build *)"
+    ]
+  }
+}

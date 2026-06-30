@@ -79,6 +79,21 @@ func CollectHandler(req *protocol.Request) (interface{}, error) {
 
 
 // =============================
+// Collector Registry
+// =============================
+
+// collectorRegistry 映射 collector 名称 → 配置文件路径
+var collectorRegistry = map[string]string{
+	"i2c-diagnose": "configs/features/i2c-diagnose.json",
+	"spi-diagnose": "configs/features/spi-diagnose.json",
+}
+
+// RegisterCollector 注册新的 collector（外部可调用）
+func RegisterCollector(name, filePath string) {
+	collectorRegistry[name] = filePath
+}
+
+// =============================
 // Load Collector JSON
 // =============================
 
@@ -89,16 +104,26 @@ func loadCollector(payload map[string]interface{}) (Collector, error) {
 		return Collector{}, fmt.Errorf("collector not found in payload")
 	}
 
-	// 这里模拟：实际应从文件/registry加载
-	if name == "i2c-diagnose" {
-		c, err := loadI2CCollector()
-		if err != nil {
-			return Collector{}, err
-		}
-		return c, nil
+	filePath, exists := collectorRegistry[name]
+	if !exists {
+		return Collector{}, fmt.Errorf("unknown collector: %s", name)
 	}
 
-	return Collector{}, fmt.Errorf("unknown collector: %s", name)
+	return loadCollectorFromFile(filePath)
+}
+
+func loadCollectorFromFile(filePath string) (Collector, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return Collector{}, fmt.Errorf("failed to read collector file: %w", err)
+	}
+
+	var c Collector
+	if err := json.Unmarshal(data, &c); err != nil {
+		return Collector{}, fmt.Errorf("invalid collector json: %w", err)
+	}
+
+	return c, nil
 }
 
 
@@ -123,7 +148,7 @@ func executeCollector(payload map[string]interface{}, id string,  c Collector) R
 		r.Steps = append(r.Steps, res)
 	}
 
-	r.Analysis = simpleAnalyze(r.Steps)
+	r.Analysis = simpleAnalyze(r.Steps, c.Name)
 
 	return r
 }
@@ -228,35 +253,15 @@ func mergeParams(a, b map[string]any) map[string]any {
 // Simple Analyzer
 // =============================
 
-func simpleAnalyze(steps []StepResult) string {
+func simpleAnalyze(steps []StepResult, collectorName string) string {
 
 	for _, s := range steps {
 		if s.Status == "fail" {
-			return "i2c diagnose failed: check bus or driver"
+			return fmt.Sprintf("%s failed: check bus or driver", collectorName)
 		}
 	}
 
-	return "i2c diagnose OK"
+	return fmt.Sprintf("%s OK", collectorName)
 }
 
 
-// =============================
-// Collector Definition (i2c)
-// =============================
-
-func loadI2CCollector() (Collector, error) {
-
-	filePath := "configs/features/i2c-diagnose.json"
-
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return Collector{}, fmt.Errorf("failed to read collector file: %w", err)
-	}
-
-	var c Collector
-	if err := json.Unmarshal(data, &c); err != nil {
-		return Collector{}, fmt.Errorf("invalid collector json: %w", err)
-	}
-
-	return c, nil
-}
