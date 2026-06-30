@@ -8,4 +8,4 @@
 obj-m := thermal_sensor.o
 FIRMWARE_CLEAN := 1
 
-include $(ENV_PATH_ROOT)/build/buildmod.mk
+include $(AGENT_PLATFORM_SOC_PATH)/mod_driverbuildmod.mk

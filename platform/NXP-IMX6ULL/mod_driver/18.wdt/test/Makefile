@@ -15,4 +15,4 @@ run_dist =$(BUILD_NFS_PATH)/home/sys/modules
 # place the executables
 buildout = wdt_test
 
-include $(ENV_PATH_ROOT)/build/buildrules.mk
+include $(AGENT_PLATFORM_SOC_PATH)/mod_driverbuildrules.mk

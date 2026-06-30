@@ -13,4 +13,4 @@ c_objects = ap_i2c_test.o
 # place the executables
 buildout = ap_i2c_test
 
-include $(ENV_PATH_ROOT)/build/buildrules.mk
+include $(AGENT_PLATFORM_SOC_PATH)/mod_driverbuildrules.mk

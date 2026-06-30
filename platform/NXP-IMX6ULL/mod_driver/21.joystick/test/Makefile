@@ -13,4 +13,4 @@ c_objects = joystick_test.o
 # place the executables
 buildout = joystick_test
 
-include $(ENV_PATH_ROOT)/build/buildrules.mk
+include $(AGENT_PLATFORM_SOC_PATH)/mod_driverbuildrules.mk

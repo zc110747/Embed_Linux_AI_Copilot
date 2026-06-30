@@ -13,4 +13,4 @@ c_objects = led_test.o
 # place the executables
 buildout = led_test
 
-include $(ENV_PATH_ROOT)/build/buildrules.mk
+include $(AGENT_PLATFORM_SOC_PATH)/mod_driverbuildrules.mk
