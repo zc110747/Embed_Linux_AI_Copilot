@@ -8,4 +8,4 @@
 obj-m := kernel_example.o
 FIRMWARE_CLEAN := 1
 
-include $(AGENT_PLATFORM_SOC_PATH)/mod_driverbuildmod.mk
+include $(AGENT_PLATFORM_SOC_PATH)/mod_driver/buildmod.mk

@@ -11,4 +11,4 @@ obj-m := ${MODULE_NAME}.o
 ${MODULE_NAME}-objs := kernel_main.o kernel_base.o
 FIRMWARE_CLEAN := 1
 
-include $(AGENT_PLATFORM_SOC_PATH)/mod_driverbuildmod.mk
+include $(AGENT_PLATFORM_SOC_PATH)/mod_driver/buildmod.mk

@@ -13,4 +13,4 @@ c_objects = key_input_test.o
 # place the executables
 buildout = key_input_test
 
-include $(AGENT_PLATFORM_SOC_PATH)/mod_driverbuildrules.mk
+include $(AGENT_PLATFORM_SOC_PATH)/mod_driver/buildrules.mk

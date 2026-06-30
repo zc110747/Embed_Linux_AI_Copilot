@@ -7,4 +7,4 @@
 ################################################################################
 obj-m := export.o
 
-include $(AGENT_PLATFORM_SOC_PATH)/mod_driverbuildmod.mk
+include $(AGENT_PLATFORM_SOC_PATH)/mod_driver/buildmod.mk

@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Test
 
 ```bash
-# Build the Go client
+# Build the Go client (requires Go 1.18+)
 go build -o main cmd/main.go
 
 # Install dependencies
@@ -33,13 +33,15 @@ Server → WebSocket → transport (read loop) → handler → Match action
 
 ### Collector DSL
 
-The `collector` package is a mini diagnostic engine. A collector is defined as a JSON file (see `configs/features/i2c-diagnose.json`) containing:
+The `collector` package is a mini diagnostic engine. A collector is defined as a JSON file in `configs/features/` (e.g. `i2c-diagnose.json`, `spi-diagnose.json`) containing:
 - **params** — default parameters with `{{placeholder}}` template syntax
 - **steps** — ordered list of `{name, type, input}` where type is `exec` (shell command) or `analyze`
 
 At runtime, the server sends `{"collector": "i2c-diagnose", "bus": 1}` in the payload. The collector loads the JSON definition, merges parameters, renders templates, and executes each step via `sh -c`. Results are aggregated into a structured response with per-step status/output and a simple pass/fail analysis.
 
-Currently only the `i2c-diagnose` collector is hardcoded in `loadCollector()`. The `runtime/workflow.go` is a stub reserved for future multi-step workflow orchestration (per `docs/plans.md`: v0.2 Workflow, v0.3 Script Engine).
+Collectors are registered in `collectorRegistry` (a `map[string]string` mapping collector name → JSON file path). Currently two are registered: `i2c-diagnose` and `spi-diagnose`. New collectors can be added at runtime via `RegisterCollector(name, filePath)`. The `analyze` step type exists in the executor but is a stub (always returns `"analysis done"`).
+
+The `runtime/workflow.go` is a stub reserved for future multi-step workflow orchestration (per `docs/plans.md`: v0.2 Workflow, v0.3 Script Engine).
 
 ### Key packages
 

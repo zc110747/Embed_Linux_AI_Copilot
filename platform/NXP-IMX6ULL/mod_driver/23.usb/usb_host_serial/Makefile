@@ -13,4 +13,4 @@ c_objects = usb_serial_test.o
 # place the executables
 buildout = usb_serial_test
 
-include $(AGENT_PLATFORM_SOC_PATH)/mod_driverbuildrules.mk
+include $(AGENT_PLATFORM_SOC_PATH)/mod_driver/buildrules.mk
