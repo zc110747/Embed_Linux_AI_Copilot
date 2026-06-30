@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//home/freedom/git/Embed_Linux_AI_Copilot/**)",
+      "Read(//home/freedom/git/Embed_Linux_AI_Copilot/platform/NXP-IMX6ULL/**)"
+    ]
+  }
+}

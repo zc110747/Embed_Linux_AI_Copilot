@@ -5,7 +5,10 @@
 # Original Author: 1107473010@qq.com
 #
 ################################################################################
-obj-m := kernel_spi_oled.o
-FIRMWARE_CLEAN := 1
+BUILD = e
 
-include $(AGENT_PLATFORM_SOC_PATH)/mod_driver/buildmod.mk
+c_objects = st7789_fb_test.o
+
+buildout = st7789_fb_test
+
+include $(AGENT_PLATFORM_SOC_PATH)/mod_driver/buildrules.mk
