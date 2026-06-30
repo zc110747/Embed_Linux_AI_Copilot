@@ -70,17 +70,50 @@ pinctrl_ecspi1: ecspi1grp {
 #include <linux/version.h>
 
 #include <drm/drm_atomic_helper.h>
-#include <drm/drm_damage_helper.h>
 #include <drm/drm_device.h>
 #include <drm/drm_drv.h>
-#include <drm/drm_fbdev_generic.h>
 #include <drm/drm_framebuffer.h>
+/*
+ * GEM 内存管理: 5.12+ 重命名为 DMA (原 CMA)
+ * 提供兼容宏: 5.12~5.x 映射到 DMA, 6.0+ 仅保留类型/基本函数映射
+ *   (prime/vmap 相关在 6.0+ 已从 drm_driver 移除, 由 GEM object funcs 处理)
+ */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 12, 0)
+#include <drm/drm_gem_dma_helper.h>
+/* 类型和基本操作 */
+#define drm_gem_cma_object              drm_gem_dma_object
+#define to_drm_gem_cma_obj(x)           to_drm_gem_dma_obj(x)
+#define drm_gem_cma_dumb_create         drm_gem_dma_dumb_create
+#define DEFINE_DRM_GEM_CMA_FOPS(name)   DEFINE_DRM_GEM_DMA_FOPS(name)
+/* prime/vmap (5.12~5.x 存在, 6.0+ 的 #if 保证不会引用) */
+#define drm_gem_cma_vm_ops              drm_gem_dma_vm_ops
+#define drm_gem_cma_prime_get_sg_table  drm_gem_dma_prime_get_sg_table
+#define drm_gem_cma_prime_import_sg_table drm_gem_dma_prime_import_sg_table
+#define drm_gem_cma_prime_vmap          drm_gem_dma_prime_vmap
+#define drm_gem_cma_prime_vunmap        drm_gem_dma_prime_vunmap
+#define drm_gem_cma_prime_mmap          drm_gem_dma_prime_mmap
+#else
 #include <drm/drm_gem_cma_helper.h>
-#include <drm/drm_gem_framebuffer_helper.h>
+#endif
+#include <drm/drm_connector.h>
 #include <drm/drm_modeset_helper.h>
 #include <drm/drm_probe_helper.h>
 #include <drm/drm_rect.h>
 #include <drm/drm_simple_kms_helper.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 18, 0)
+#include <drm/drm_damage_helper.h>
+#include <drm/drm_gem_framebuffer_helper.h>
+#endif
+
+/*
+ * fbdev emulation support.
+ * 使用前向声明以避免不同BSP间头文件路径差异导致编译失败。
+ * 函数实现位于 drm_fbdev_generic.c, 在 CONFIG_DRM_FBDEV_EMULATION=y 时
+ * 由内核符号表解析。若链接报告 Unknown symbol, 请确保内核启用了该配置。
+ */
+#ifdef CONFIG_DRM_FBDEV_EMULATION
+void drm_fbdev_generic_setup(struct drm_device *dev, unsigned int preferred_bpp);
+#endif
 
 /* ST7789V 寄存器命令定义 */
 #define ST7789_NOP          0x00    /* 空操作 */
@@ -375,7 +408,6 @@ static void st7789_panel_disable(struct st7789_priv *priv)
 static int st7789_parse_dt(struct st7789_priv *priv)
 {
     struct device *dev = &priv->spi->dev;
-    u32 val;
 
     if (of_property_read_u16(dev->of_node, "width", &priv->width))
         priv->width = ST7789_DEF_WIDTH;
@@ -518,18 +550,21 @@ static void st7789_pipe_update(struct drm_simple_display_pipe *pipe,
 {
     struct st7789_priv *priv = container_of(pipe, struct st7789_priv, pipe);
     struct drm_plane_state *state = pipe->plane.state;
-    struct drm_atomic_helper_damage_iter iter;
     struct drm_gem_cma_object *cma_obj;
     struct drm_framebuffer *fb = state->fb;
     struct drm_rect dirty_rect;
-    struct drm_rect damage;
     bool has_damage = false;
     void *vaddr;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 18, 0)
+    struct drm_atomic_helper_damage_iter iter;
+    struct drm_rect damage;
+#endif
 
     if (!fb)
         return;
 
-    cma_obj = drm_fb_cma_get_gem_obj(fb, 0);
+    /* 直接获取GEM CMA对象 (兼容CMA/DMA命名变化) */
+    cma_obj = to_drm_gem_cma_obj(fb->obj[0]);
     if (!cma_obj) {
         dev_err(&priv->spi->dev, "gem obj not found\n");
         return;
@@ -547,6 +582,7 @@ static void st7789_pipe_update(struct drm_simple_display_pipe *pipe,
     dirty_rect.x2 = 0;
     dirty_rect.y2 = 0;
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 18, 0)
     /* 收集所有脏片段, 计算最小包围矩形 */
     drm_atomic_helper_damage_iter_init(&iter, old_state, state);
     while (drm_atomic_helper_damage_iter_next(&iter, &damage)) {
@@ -556,6 +592,7 @@ static void st7789_pipe_update(struct drm_simple_display_pipe *pipe,
         dirty_rect.y2 = max(dirty_rect.y2, (int)damage.y2);
         has_damage = true;
     }
+#endif
 
     /* 无脏片段信息 → 全屏刷新 */
     if (!has_damage) {
@@ -670,13 +707,29 @@ static const struct drm_connector_funcs st7789_connector_funcs = {
 
 /*
  * DRM mode_config_funcs
- * fb_create使用drm_gem_fb_create_with_dirty, 内建dirty回调支持
+ * fb_create: 4.18+ 使用 drm_gem_fb_create_with_dirty (内建dirty支持),
+ *           更早版本使用 drm_gem_fb_create (fallback全屏刷新)
  */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 18, 0)
 static const struct drm_mode_config_funcs st7789_mode_config_funcs = {
     .fb_create              = drm_gem_fb_create_with_dirty,
     .atomic_check           = drm_atomic_helper_check,
     .atomic_commit          = drm_atomic_helper_commit,
 };
+#else
+static struct drm_framebuffer *
+st7789_fb_create(struct drm_device *dev, struct drm_file *file_priv,
+                 const struct drm_mode_fb_cmd2 *mode_cmd)
+{
+    return drm_gem_fb_create(dev, file_priv, mode_cmd);
+}
+
+static const struct drm_mode_config_funcs st7789_mode_config_funcs = {
+    .fb_create              = st7789_fb_create,
+    .atomic_check           = drm_atomic_helper_check,
+    .atomic_commit          = drm_atomic_helper_commit,
+};
+#endif
 
 /* 支持的像素格式 */
 static const u32 st7789_formats[] = {
@@ -688,22 +741,34 @@ static const u32 st7789_formats[] = {
  */
 DEFINE_DRM_GEM_CMA_FOPS(st7789_fops);
 
+/*
+ * DRM driver 结构体 — 根据内核版本配置不同的 GEM 操作
+ *
+ * 5.11-: gem_vm_ops 存在
+ * 6.0-:  gem_prime_* / dumb_create 在 drm_driver 中显式设置
+ * 6.0+:  这些操作全部移入 drm_gem_object_funcs, drm_driver 极简
+ */
 static const struct drm_driver st7789_drm_driver = {
     .driver_features        = DRIVER_GEM | DRIVER_MODESET | DRIVER_ATOMIC,
     .fops                   = &st7789_fops,
-    /* GEM CMA ops: 手动列出以兼容内核 4.14+ */
-    .dumb_create            = drm_gem_cma_dumb_create,
-    .gem_vm_ops             = &drm_gem_cma_vm_ops,
-    .gem_prime_get_sg_table = drm_gem_cma_prime_get_sg_table,
-    .gem_prime_import_sg_table = drm_gem_cma_prime_import_sg_table,
-    .gem_prime_vmap         = drm_gem_cma_prime_vmap,
-    .gem_prime_vunmap       = drm_gem_cma_prime_vunmap,
-    .gem_prime_mmap         = drm_gem_cma_prime_mmap,
     .name                   = "st7789",
     .desc                   = "ST7789V SPI Display Driver",
     .date                   = "20240329",
     .major                  = 1,
     .minor                  = 0,
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 0, 0)
+    .dumb_create            = drm_gem_cma_dumb_create,
+#endif
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0)
+    .gem_vm_ops             = &drm_gem_cma_vm_ops,
+#endif
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 0, 0)
+    .gem_prime_get_sg_table   = drm_gem_cma_prime_get_sg_table,
+    .gem_prime_import_sg_table = drm_gem_cma_prime_import_sg_table,
+    .gem_prime_vmap           = drm_gem_cma_prime_vmap,
+    .gem_prime_vunmap         = drm_gem_cma_prime_vunmap,
+    .gem_prime_mmap           = drm_gem_cma_prime_mmap,
+#endif
 };
 
 /*
@@ -800,16 +865,20 @@ static int st7789_probe(struct spi_device *spi)
     drm->mode_config.preferred_depth = 24;
     drm->mode_config.funcs = &st7789_mode_config_funcs;
 
-    /* 8. 创建connector和simple display pipe */
-    connector = drm_connector_create_with_helper_funcs(drm,
-                        &st7789_connector_funcs,
-                        &st7789_connector_hfuncs,
-                        DRM_MODE_CONNECTOR_SPI);
-    if (IS_ERR(connector)) {
-        ret = PTR_ERR(connector);
-        dev_err(dev, "connector create failed: %d\n", ret);
+    /* 8. 创建connector (drm_connector_init 全版本兼容) */
+    connector = devm_kzalloc(dev, sizeof(*connector), GFP_KERNEL);
+    if (!connector) {
+        ret = -ENOMEM;
+        dev_err(dev, "connector alloc failed!\n");
         goto err_mode_config_cleanup;
     }
+    ret = drm_connector_init(drm, connector, &st7789_connector_funcs,
+                              DRM_MODE_CONNECTOR_SPI);
+    if (ret) {
+        dev_err(dev, "connector init failed: %d\n", ret);
+        goto err_mode_config_cleanup;
+    }
+    drm_connector_helper_add(connector, &st7789_connector_hfuncs);
 
     /*
      * drm_simple_display_pipe_init 会自动:
@@ -826,17 +895,21 @@ static int st7789_probe(struct spi_device *spi)
         goto err_connector_cleanup;
     }
 
-    /* 9. 使能plane damage clips跟踪(局部刷新核心) */
+    /* 9. 使能plane damage clips跟踪(局部刷新核心, 需要4.18+) */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 18, 0)
     drm_plane_enable_fb_damage_clips(&priv->pipe.plane);
+#endif
 
     /* 10. 设置fbdev emulation (提供 /dev/fb0) */
+#ifdef CONFIG_DRM_FBDEV_EMULATION
     drm_fbdev_generic_setup(drm, 0);
+#endif
 
     /* 11. 注册DRM设备 */
     ret = drm_dev_register(drm, 0);
     if (ret) {
         dev_err(dev, "drm_dev_register failed: %d\n", ret);
-        goto err_fbdev_cleanup;
+        goto err_connector_cleanup;
     }
 
     /* 12. 开启背光 */
@@ -848,10 +921,8 @@ static int st7789_probe(struct spi_device *spi)
 
     return 0;
 
-err_fbdev_cleanup:
-    drm_fbdev_generic_fini(drm);
 err_connector_cleanup:
-    drm_connector_cleanup(connector);
+    /* drm_mode_config_cleanup 会统一清理 connector, 不显式重复 */
 err_mode_config_cleanup:
     drm_mode_config_cleanup(drm);
     drm_dev_put(drm);
@@ -872,8 +943,8 @@ static void st7789_remove(struct spi_device *spi)
     if (priv->backlight_gpio)
         gpiod_set_value_cansleep(priv->backlight_gpio, 0);
 
-    /* 卸载DRM设备 (阻塞等待所有用户释放) */
-    drm_dev_unplug(drm);
+    /* 卸载DRM设备 */
+    drm_dev_unregister(drm);
     drm_atomic_helper_shutdown(drm);
 
     /* 关闭面板 */
