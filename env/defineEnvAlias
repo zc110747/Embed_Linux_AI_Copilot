@@ -18,12 +18,14 @@ export AGENT_PLATFORM_SOC_PATH=${AGENT_PLATFORM_PATH}/${CPU_PROGRAM}
 
 export AGENT_SDK_PATH=${AGENT_SOURCE_PATH}/sdk
 export AGENT_SDK_QEMU_PATH=${AGENT_SDK_PATH}/qemu
-export AGENT_SDK_SOC_PATH=${AGENT_SDK_PATH}/${CPU_PROGRAM}
 export AGENT_SDK_NFS_PATH=${AGENT_SDK_SOC_PATH}/nfs
+export AGENT_SDK_SOC_PATH=${AGENT_SDK_PATH}/${CPU_PROGRAM}
+export AGENT_SDK_KERNEL_PATH=${AGENT_SDK_SOC_PATH}/kernel
 
 source ${AGENT_SOURCE_PATH}/env/defineAlias
 
 export AGENT_IMG=buildroot.img
+
 
 #-------------------------------------------------------------------------------
 # This section defines global alias

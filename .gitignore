@@ -4,3 +4,10 @@ sdk/NXP-IMX6ULL
 sdk/qemu
 
 ws-board-agent/ws-board-agent*
+
+*.ko
+*.cmd
+*.mod*
+*.o
+*.order
+*.symvers
