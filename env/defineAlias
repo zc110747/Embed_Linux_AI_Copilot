@@ -38,7 +38,9 @@ alias AgentRootfs="build_rootfs"
 
 function mount_rootfs()
 {
-    sdk_img="${AGENT_SDK_SOC_PATH}"/package/debian.img
+    sudo umount -l ${AGENT_SDK_NFS_PATH}
+    
+    sdk_img="${AGENT_SDK_SOC_PATH}"/package/${AGENT_IMG}
 
     if [ ! -f "$sdk_img" ]; then
         echo "no exist:${sdk_img}" 
@@ -46,11 +48,22 @@ function mount_rootfs()
     fi
 
     sudo mount -o loop ${sdk_img} ${AGENT_SDK_NFS_PATH}
+
+    sudo mount -t proc chproc "${AGENT_SDK_NFS_PATH}"/proc
+    sudo mount -t sysfs chsys "${AGENT_SDK_NFS_PATH}"/sys
+    sudo mount -t devtmpfs chdev "${AGENT_SDK_NFS_PATH}"/dev || sudo mount --bind /dev "${workdir}"/dev
+    sudo mount -t devpts chpts "${AGENT_SDK_NFS_PATH}"/dev/pts
+
+    LC_ALL=C LANGUAGE=C LANG=C sudo chroot "${AGENT_SDK_NFS_PATH}"
 }
 alias AgentMountRootfs="mount_rootfs"
 
 function umount_rootfs()
 {
+    sudo umount -l --recursive "${AGENT_SDK_NFS_PATH}"/dev >/dev/null 2>&1
+    sudo umount -l "${AGENT_SDK_NFS_PATH}"/proc >/dev/null 2>&1
+    sudo umount -l "${AGENT_SDK_NFS_PATH}"/sys >/dev/null 2>&1
+
     sudo umount -l ${AGENT_SDK_NFS_PATH}
 }
 alias AgentUMountRootfs="umount_rootfs"

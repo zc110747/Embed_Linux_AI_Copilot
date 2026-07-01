@@ -54,7 +54,7 @@ function qemu_run()
     # nogui
     # qemu_tools=qemu-system-arm
     qemu_tools=${AGENT_SDK_QEMU_PATH}/build/qemu-system-arm
-    sudo ${qemu_tools} -M mcimx6ul-evk -m 512M -kernel "${kernel_file}" \
+    sudo ${qemu_tools} -M mcimx6ul-evk -m 1G -kernel "${kernel_file}" \
         -dtb "${dtb_file}"  \
         -nographic \
         -serial mon:stdio \

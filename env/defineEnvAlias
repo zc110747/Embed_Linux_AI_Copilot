@@ -8,6 +8,7 @@ echo "Load the AI Copilot Env Data..."
 
 export CPU_PROGRAM=NXP-IMX6ULL
 export COMPILE_CPU_CORE=6
+export AGENT_IMG=ubuntu.img
 
 #-------------------------------------------------------------------------------
 # This section defines the internal 
@@ -23,9 +24,6 @@ export AGENT_SDK_SOC_PATH=${AGENT_SDK_PATH}/${CPU_PROGRAM}
 export AGENT_SDK_KERNEL_PATH=${AGENT_SDK_SOC_PATH}/kernel
 
 source ${AGENT_SOURCE_PATH}/env/defineAlias
-
-export AGENT_IMG=buildroot.img
-
 
 #-------------------------------------------------------------------------------
 # This section defines global alias
