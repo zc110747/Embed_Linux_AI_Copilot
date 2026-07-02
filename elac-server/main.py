@@ -1,328 +1,382 @@
-#!/usr/bin/env python3
-"""
-增强版WebSocket测试服务端
-- 支持Web界面
-- 支持批量命令
-- 命令历史记录
-- 统计分析
-"""
-
-import asyncio
+import os
 import json
-import uuid
-import logging
 import time
 from datetime import datetime
-from collections import defaultdict
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import threading
-import websockets
+from typing import Optional, List, Dict
+import requests
+from colorama import init, Fore, Style
+from cmd_handler import ATCommandHandler
 
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# 初始化colorama
+init(autoreset=True)
 
-class CommandStats:
-    """命令统计"""
-    def __init__(self):
-        self.total_commands = 0
-        self.successful = 0
-        self.failed = 0
-        self.commands_history = []
-        self.response_times = []
-        
-    def add_command(self, cmd_id, command, code, response_time):
-        self.total_commands += 1
-        if code == 0:
-            self.successful += 1
-        else:
-            self.failed += 1
-        
-        self.commands_history.append({
-            "id": cmd_id,
-            "command": command,
-            "code": code,
-            "time": response_time,
-            "timestamp": datetime.now().isoformat()
-        })
-        
-        self.response_times.append(response_time)
-        if len(self.response_times) > 100:
-            self.response_times.pop(0)
+def load_skills(file_path: str) -> str:
+    """
+    加载skills文件内容
     
-    def get_average_time(self):
-        if not self.response_times:
-            return 0
-        return sum(self.response_times) / len(self.response_times)
-
-class WebSocketServer:
-    def __init__(self, host='0.0.0.0', port=8080):
-        self.host = host
-        self.port = port
-        self.clients = {}
-        self.stats = CommandStats()
-        self.web_port = 8081
+    Args:
+        file_path: skills文件路径
         
-    async def handle_client(self, websocket, path):
-        """处理客户端连接"""
-        client_id = str(uuid.uuid4())[:8]
-        client_info = {
-            "id": client_id,
-            "websocket": websocket,
-            "connected_at": datetime.now(),
-            "ip": websocket.remote_address[0],
-            "commands_executed": 0
+    Returns:
+        skills文件内容字符串，加载失败返回空字符串
+    """
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        print(Fore.GREEN + f"✓ 成功加载skills文件: {file_path}")
+        return content
+    except FileNotFoundError:
+        print(Fore.YELLOW + f"⚠ skills文件未找到: {file_path}")
+        return ""
+    except Exception as e:
+        print(Fore.RED + f"✗ 加载skills文件失败: {str(e)}")
+        return ""
+
+
+class DeepSeekChat:
+    """DeepSeek API 聊天客户端"""
+    
+    def __init__(self, api_key: str, base_url: str = "https://api.deepseek.com/v1", 
+                 skills_file: str = "skills/hw_skills.md"):
+        """
+        初始化DeepSeek客户端
+        
+        Args:
+            api_key: DeepSeek API密钥
+            base_url: API基础URL
+            skills_file: skills文件路径，用于加载系统提示词
+        """
+        self.api_key = api_key
+        self.base_url = base_url
+        self.conversation_history: List[Dict] = []
+        self.headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
         }
-        self.clients[client_id] = client_info
+
+        # 加载skills文件作为系统提示词
+        self.system_prompt = load_skills(skills_file)
+        if self.system_prompt:
+            self.send_message(self.system_prompt, add_history=True)
+    
+    def clear_history(self) -> None:
+        """清空对话历史"""
+        self.conversation_history = []
+        print(Fore.YELLOW + "✓ 对话历史已清空")
+    
+    def send_message(self, user_input: str, add_history: bool = False, stream: bool = False, 
+                     temperature: float = 0.7, max_tokens: int = 2000) -> Optional[str]:
+        """
+        发送消息到DeepSeek API并获取回复
         
-        logger.info(f"✅ Client connected: {client_id} from {client_info['ip']}")
-        self.print_client_stats()
-        
+        Args:
+            user_input: 用户输入的消息
+            stream: 是否使用流式输出
+            temperature: 温度参数(0-1)，控制随机性
+            max_tokens: 最大token数
+            
+        Returns:
+            API的回复内容，失败返回None
+        """
+
+        # 添加用户消息到历史
+        # 只有skills文件作为系统提示词时才添加，普通消息不添加
+        messages = self.conversation_history[:]
+        messages.append({"role": "user", "content": user_input})
+        payload = {
+            "model": "deepseek-chat",
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": stream
+        }
+        if add_history:
+            self.conversation_history = messages
+
         try:
-            # 发送测试命令序列
-            await self.send_test_sequence(websocket, client_id)
-            
-            # 启动命令输入和消息接收
-            send_task = asyncio.create_task(self.command_input_loop(websocket))
-            recv_task = asyncio.create_task(self.message_receiver(websocket, client_id))
-            
-            done, pending = await asyncio.wait(
-                [send_task, recv_task],
-                return_when=asyncio.FIRST_COMPLETED
-            )
-            
-            for task in pending:
-                task.cancel()
-                
-        except websockets.exceptions.ConnectionClosed:
-            logger.info(f"🔌 Client {client_id} disconnected")
+            if stream:
+                return self._send_stream_request(payload)
+            else:
+                return self._send_normal_request(payload)
         except Exception as e:
-            logger.error(f"❌ Error with client {client_id}: {e}")
-        finally:
-            del self.clients[client_id]
-            self.print_client_stats()
+            print(Fore.RED + f"✗ 发送消息失败: {str(e)}")
+            return None
     
-    async def send_test_sequence(self, websocket, client_id):
-        """发送测试命令序列"""
-        test_commands = [
-            "uname -a",
-            "whoami",
-            "pwd",
-            "date"
-        ]
+    def _send_normal_request(self, payload: Dict) -> Optional[str]:
+        """发送普通请求（非流式）"""
+        response = requests.post(
+            f"{self.base_url}/chat/completions",
+            headers=self.headers,
+            json=payload,
+            timeout=30
+        )
         
-        logger.info(f"📤 Sending test sequence to {client_id}...")
-        for cmd in test_commands:
-            cmd_id = str(uuid.uuid4())[:8]
-            message = {
-                "id": cmd_id,
-                "type": "shell",
-                "cmd": cmd
-            }
-            await websocket.send(json.dumps(message))
-            logger.info(f"   Sent [{cmd_id}]: {cmd}")
-            await asyncio.sleep(0.5)
-        
-        logger.info("✅ Test sequence complete")
-        logger.info("-" * 50)
+        if response.status_code == 200:
+            assistant_message = response.json()["choices"][0]["message"]["content"]
+            return assistant_message
+        else:
+            print(Fore.RED + f"API错误: {response.status_code} - {response.text}")
+            return None
     
-    async def command_input_loop(self, websocket):
-        """命令输入循环"""
-        logger.info("\n📝 Interactive command mode:")
-        logger.info("   Type commands to execute on clients")
-        logger.info("   Special commands:")
-        logger.info("     /clients  - List connected clients")
-        logger.info("     /stats    - Show statistics")
-        logger.info("     /batch    - Send batch commands")
-        logger.info("     /quit     - Exit")
-        logger.info("-" * 50)
+    def _send_stream_request(self, payload: Dict) -> Optional[str]:
+        """发送流式请求"""
+
+        print(Fore.YELLOW + "正在发送流式请求...")
+
+        response = requests.post(
+            f"{self.base_url}/chat/completions",
+            headers=self.headers,
+            json=payload,
+            stream=True,
+            timeout=30
+        )
         
-        loop = asyncio.get_event_loop()
+        if response.status_code == 200:
+            full_response = ""
+            print(Fore.CYAN + "助手: ", end="", flush=True)
+            
+            for line in response.iter_lines():
+                if line:
+                    line = line.decode('utf-8')
+                    if line.startswith('data: '):
+                        data = line[6:]
+                        if data != '[DONE]':
+                            try:
+                                chunk = json.loads(data)
+                                if 'choices' in chunk and len(chunk['choices']) > 0:
+                                    delta = chunk['choices'][0].get('delta', {})
+                                    content = delta.get('content', '')
+                                    if content:
+                                        print(content, end="", flush=True)
+                                        full_response += content
+                            except json.JSONDecodeError:
+                                continue
+            
+            print()  # 换行
+            return full_response
+        else:
+            print(Fore.RED + f"API错误: {response.status_code}")
+            return None
+    
+    def get_history_summary(self) -> None:
+        """显示对话历史摘要"""
+        if not self.conversation_history:
+            print(Fore.YELLOW + "暂无对话历史")
+            return
         
-        while True:
+        print(Fore.GREEN + "\n" + "="*50)
+        print(Fore.GREEN + "对话历史摘要")
+        print(Fore.GREEN + "="*50)
+        
+        for i, msg in enumerate(self.conversation_history, 1):
+            role = "用户" if msg["role"] == "user" else "助手"
+            content_preview = msg["content"][:50] + "..." if len(msg["content"]) > 50 else msg["content"]
+            print(f"{i}. {role}: {content_preview}")
+        
+        print(Fore.GREEN + "="*50 + "\n")
+
+
+class InteractiveChatApp:
+    """交互式聊天应用"""
+    
+    def __init__(self):
+        self.client: Optional[DeepSeekChat] = None
+        self.running = True
+        self.cmd_handler = ATCommandHandler()
+        
+    def print_banner(self) -> None:
+        """打印应用横幅"""
+        banner = f"""
+{Fore.CYAN}{'='*60}
+{Fore.GREEN}   DeepSeek API 智能对话助手
+{Fore.YELLOW}   支持周期性输入，实时返回响应
+{Fore.CYAN}{'='*60}
+{Fore.WHITE}
+命令说明:
+  /quit 或 /exit  - 退出程序
+  /clear          - 清空对话历史
+  /history        - 查看对话历史
+  /stream on/off  - 开启/关闭流式输出
+  /temp <value>   - 设置温度参数(0-1)
+  /help           - 显示帮助信息
+{Fore.CYAN}{'='*60}{Style.RESET_ALL}
+        """
+        print(banner)
+    
+    def setup_api_key(self) -> bool:
+        """
+        设置API密钥
+        
+        Returns:
+            是否成功设置API密钥
+        """
+        print(Fore.YELLOW + "\n请设置DeepSeek API密钥")
+        print(Fore.WHITE + "获取密钥: https://platform.deepseek.com/api_keys")
+        
+        # 优先从环境变量读取
+        api_key = os.getenv("DEEPSEEK_API_KEY")
+        
+        if not api_key:
+            api_key = input(Fore.WHITE + "\n请输入API密钥: ").strip()
+        
+        if not api_key:
+            print(Fore.RED + "错误: API密钥不能为空")
+            return False
+        
+        self.client = DeepSeekChat(api_key)
+        print(Fore.GREEN + "✓ API密钥设置成功\n")
+        return True
+    
+    def run(self) -> None:
+        """运行聊天应用"""
+        self.print_banner()
+        
+        if not self.setup_api_key():
+            return
+        
+        # 配置参数
+        use_stream = True
+        temperature = 0.7
+        
+        print(Fore.GREEN + "进入对话模式，输入 /help 查看命令")
+        print(Fore.CYAN + "-"*60 + "\n")
+        
+        while self.running:
             try:
-                command = await loop.run_in_executor(
-                    None, input, "\n💻 Command> "
+                # 获取用户输入
+                user_input = input(Fore.YELLOW + "你: " + Style.RESET_ALL).strip()
+                
+                if not user_input:
+                    continue
+                
+                # 处理命令
+                if user_input.startswith("/"):
+                    use_stream, temperature = self.handle_command(user_input, use_stream, temperature)
+                    continue
+                
+                # 发送消息并获取回复
+                print(Fore.CYAN + "助手: " + Style.RESET_ALL, end="")
+                response = self.client.send_message(
+                    user_input, 
+                    stream=use_stream,
+                    temperature=temperature
                 )
                 
-                if not command.strip():
-                    continue
+                if not response:
+                    print(Fore.RED + "\n获取回复失败，请重试")
                 
-                # 处理特殊命令
-                if command.startswith('/'):
-                    await self.handle_special_command(command, websocket)
-                    continue
+                if not use_stream:
+                    print(response)
                 
-                # 发送普通命令
-                cmd_id = str(uuid.uuid4())[:8]
-                message = {
-                    "id": cmd_id,
-                    "type": "shell",
-                    "cmd": command
-                }
                 
-                await websocket.send(json.dumps(message))
-                logger.info(f"📤 Sent [{cmd_id}]: {command}")
-                
-            except EOFError:
+                self.cmd_handler.execute_command(response)
+
+            except KeyboardInterrupt:
+                print(Fore.YELLOW + "\n\n检测到中断信号，正在退出...")
                 break
             except Exception as e:
-                logger.error(f"❌ Error: {e}")
-                break
-    
-    async def handle_special_command(self, command, websocket):
-        """处理特殊命令"""
-        cmd = command.lower()
+                print(Fore.RED + f"发生错误: {str(e)}")
         
-        if cmd == '/clients':
-            self.print_client_stats()
-        elif cmd == '/stats':
-            self.print_stats()
-        elif cmd == '/batch':
-            await self.send_batch_commands(websocket)
-        elif cmd == '/quit':
-            logger.info("👋 Exiting...")
-            return
+        print(Fore.GREEN + "\n感谢使用DeepSeek对话助手，再见！")
+    
+    def handle_command(self, command: str, use_stream: bool, temperature: float) -> tuple:
+        """处理用户命令"""
+        cmd_parts = command.lower().split()
+        cmd = cmd_parts[0]
+        
+        if cmd in ["/quit", "/exit"]:
+            self.running = False
+            return use_stream, temperature
+        
+        elif cmd == "/clear":
+            self.client.clear_history()
+        
+        elif cmd == "/history":
+            self.client.get_history_summary()
+        
+        elif cmd == "/stream":
+            if len(cmd_parts) > 1:
+                if cmd_parts[1] == "on":
+                    use_stream = True
+                    print(Fore.GREEN + "✓ 流式输出已开启")
+                elif cmd_parts[1] == "off":
+                    use_stream = False
+                    print(Fore.GREEN + "✓ 流式输出已关闭")
+                else:
+                    print(Fore.RED + "使用方法: /stream on/off")
+            else:
+                print(Fore.YELLOW + f"当前流式输出状态: {'开启' if use_stream else '关闭'}")
+        
+        elif cmd == "/temp":
+            if len(cmd_parts) > 1:
+                try:
+                    new_temp = float(cmd_parts[1])
+                    if 0 <= new_temp <= 1:
+                        temperature = new_temp
+                        print(Fore.GREEN + f"✓ 温度参数已设置为: {temperature}")
+                    else:
+                        print(Fore.RED + "温度参数必须在0-1之间")
+                except ValueError:
+                    print(Fore.RED + "请输入有效的数字")
+            else:
+                print(Fore.YELLOW + f"当前温度参数: {temperature}")
+        
+        elif cmd == "/help":
+            self.print_help()
+        
         else:
-            logger.warning(f"Unknown command: {command}")
+            print(Fore.RED + f"未知命令: {command}，输入 /help 查看可用命令")
+        
+        return use_stream, temperature
     
-    async def send_batch_commands(self, websocket):
-        """发送批量命令"""
-        loop = asyncio.get_event_loop()
-        
-        logger.info("📦 Batch command mode (empty line to send, 'cancel' to abort):")
-        commands = []
-        
-        while True:
-            try:
-                cmd = await loop.run_in_executor(None, input, "   Batch> ")
-                
-                if cmd.lower() == 'cancel':
-                    logger.info("❌ Batch cancelled")
-                    return
-                
-                if not cmd.strip():
-                    if not commands:
-                        logger.warning("No commands to send")
-                        return
-                    break
-                
-                commands.append(cmd)
-                
-            except EOFError:
-                break
-        
-        logger.info(f"📤 Sending {len(commands)} batch commands...")
-        for cmd in commands:
-            cmd_id = str(uuid.uuid4())[:8]
-            message = {
-                "id": cmd_id,
-                "type": "shell",
-                "cmd": cmd
-            }
-            await websocket.send(json.dumps(message))
-            await asyncio.sleep(0.2)
-        
-        logger.info("✅ Batch commands sent")
-    
-    async def message_receiver(self, websocket, client_id):
-        """接收客户端消息"""
-        start_times = {}
-        
-        async for message in websocket:
-            try:
-                data = json.loads(message)
-                cmd_id = data.get('id', 'unknown')
-                code = data.get('code', -1)
-                stdout = data.get('stdout', '')
-                stderr = data.get('stderr', '')
-                
-                # 计算响应时间
-                response_time = time.time() - start_times.get(cmd_id, time.time())
-                
-                # 更新统计
-                self.stats.add_command(cmd_id, data.get('cmd', 'unknown'), code, response_time)
-                
-                # 更新客户端信息
-                if client_id in self.clients:
-                    self.clients[client_id]['commands_executed'] += 1
-                
-                # 格式化输出
-                self.print_response(cmd_id, code, stdout, stderr, response_time)
-                
-            except json.JSONDecodeError:
-                logger.error(f"❌ Invalid JSON: {message[:100]}")
-            except Exception as e:
-                logger.error(f"❌ Error processing message: {e}")
-    
-    def print_response(self, cmd_id, code, stdout, stderr, response_time):
-        """格式化打印响应"""
-        print(f"\n{'='*60}")
-        print(f"📥 Response [{cmd_id}] - Time: {response_time:.2f}s")
-        print(f"   Exit Code: {code}")
-        
-        if stdout:
-            print(f"   📊 STDOUT:")
-            for line in stdout.strip().split('\n'):
-                print(f"      {line}")
-        
-        if stderr:
-            print(f"   ⚠️  STDERR:")
-            for line in stderr.strip().split('\n'):
-                print(f"      {line}")
-        
-        print(f"{'='*60}")
-    
-    def print_client_stats(self):
-        """打印客户端统计"""
-        print(f"\n{'='*60}")
-        print(f"📊 Connected Clients: {len(self.clients)}")
-        for client_id, info in self.clients.items():
-            print(f"   • {client_id} from {info['ip']} - {info['commands_executed']} commands")
-        print(f"{'='*60}")
-    
-    def print_stats(self):
-        """打印统计信息"""
-        stats = self.stats
-        print(f"\n{'='*60}")
-        print(f"📊 Command Statistics:")
-        print(f"   Total: {stats.total_commands}")
-        print(f"   Successful: {stats.successful}")
-        print(f"   Failed: {stats.failed}")
-        print(f"   Avg Response Time: {stats.get_average_time():.3f}s")
-        print(f"{'='*60}")
-    
-    async def start(self):
-        """启动服务器"""
-        logger.info(f"🚀 Starting WebSocket server on ws://{self.host}:{self.port}")
-        
-        async with websockets.serve(
-            self.handle_client, 
-            self.host, 
-            self.port,
-            ping_interval=30,
-            ping_timeout=10
-        ):
-            await asyncio.Future()
+    def print_help(self) -> None:
+        """打印帮助信息"""
+        help_text = f"""
+{Fore.GREEN}可用命令:
+  /quit, /exit    - 退出程序
+  /clear          - 清空当前对话历史
+  /history        - 查看对话历史记录
+  /stream on/off  - 开启或关闭流式输出模式
+  /temp <value>   - 设置温度参数(0-1)，控制回复的创造性
+  /help           - 显示此帮助信息
+
+{Fore.GREEN}使用技巧:
+  • 流式输出可以实时看到AI的回复生成过程
+  • 温度参数越低，回复越确定；越高，回复越有创造性
+  • 对话历史会自动保存，可以使用/clear清空重新开始
+  • 支持多轮对话，AI会记住之前的上下文
+        """
+        print(help_text)
+
 
 def main():
-    import argparse
-    
-    parser = argparse.ArgumentParser(description='Enhanced WebSocket Test Server')
-    parser.add_argument('--host', default='0.0.0.0', help='Bind address')
-    parser.add_argument('--port', type=int, default=8080, help='WebSocket port')
-    
-    args = parser.parse_args()
-    
-    server = WebSocketServer(host=args.host, port=args.port)
-    
+    """主函数"""
+    # 检查requests库是否安装
     try:
-        asyncio.run(server.start())
-    except KeyboardInterrupt:
-        logger.info("\n👋 Server stopped")
+        import requests
+    except ImportError:
+        print("请先安装requests库: pip install requests")
+        return
+    
+    # 检查colorama库是否安装
+    try:
+        from colorama import init
+    except ImportError:
+        print("请先安装colorama库: pip install colorama")
+        return
+    
+    # 运行应用
+    app = InteractiveChatApp()
+    app.run()
+
+
+if __name__ == "__main__":
+    main()
+
+
+if __name__ == "__main__":
+    main()
+
 
 if __name__ == "__main__":
     main()
